@@ -74,27 +74,27 @@ Run these in order. Abort on any failure with a clear message.
 3. **Fork and upstream detected**: both `FORK_REMOTE` and `UPSTREAM_REMOTE` must be non-empty. If the fork remote is missing, abort and tell the user to:
    - create a fork on GitHub,
    - add it as a remote: `git remote add origin https://github.com/<user>/<repo>.git`.
-4. **Current branch**: detect with `git rev-parse --abbrev-ref HEAD`. If it is not `main`, ask the user whether to check out `main` before continuing. Do not proceed without confirmation.
-5. **Working tree cleanliness**: run `git status --porcelain`. If there are uncommitted changes, show them to the user and ask how to proceed:
+4. **Capture the initial branch**: detect and store with `INITIAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)`. Any branch is acceptable as the starting point — this is where the command file lives in the working tree and where you will return after each block. Do **not** force the user onto `main`. Just note the branch.
+5. **Command file self-check**: verify `[ -f "$REPO_ROOT/.opencode/command/review-content.md" ]`. If missing, abort with: "The command file is not in this branch. Check out the branch that contains `.opencode/command/review-content.md` (typically `tooling/review-content`) and re-invoke."
+6. **Working tree cleanliness**: run `git status --porcelain`. If there are uncommitted changes, show them to the user and ask how to proceed:
    - stash them (auto-restore at end),
    - abort,
    - continue and ignore (risky — only if the user confirms).
    Never auto-stash without consent.
-6. **Main up to date with upstream**:
+7. **Fetch upstream main** (base for all content branches):
    ```bash
    git fetch "$UPSTREAM_REMOTE" main --quiet
-   if [ "$(git rev-list --count HEAD..${UPSTREAM_REMOTE}/main)" -gt 0 ]; then
-     git merge --ff-only "${UPSTREAM_REMOTE}/main"
-   fi
    ```
-   If the fast-forward fails, abort and report.
-7. **Fork main in sync with upstream main**:
+   Do **not** check out or modify the local `main` branch. Content branches are created directly from `${UPSTREAM_REMOTE}/main` without touching the current working branch.
+8. **Keep fork `main` synced with upstream `main`** (optional, best-effort, no local checkout required):
    ```bash
-   git fetch "$FORK_REMOTE" main --quiet
    if [ "$(git rev-list --count ${FORK_REMOTE}/main..${UPSTREAM_REMOTE}/main)" -gt 0 ]; then
-     git push "$FORK_REMOTE" main
+     gh repo sync "${FORK_OWNER}/${UPSTREAM_REPO}" \
+       --source "${UPSTREAM_OWNER}/${UPSTREAM_REPO}" \
+       --branch main
    fi
    ```
+   If `gh repo sync` fails (non-fast-forward), report to the user but continue — fork `main` out-of-sync does not block content PRs, because branches are cut from `upstream/main` directly.
 
 ---
 
@@ -187,9 +187,11 @@ Ask: `Apply this change? [Y]es / [N]o / [E]dit proposal`.
 
 ### 5.2 Create atomic branch
 
+Content branches are cut directly from `${UPSTREAM_REMOTE}/main` — not from the local working branch. This keeps PRs clean (only the content change, no tooling commits) and makes them trivially mergeable by upstream.
+
 ```bash
-git checkout main
-git pull --ff-only "$UPSTREAM_REMOTE" main
+# upstream/main was already fetched in preflight; re-fetch just in case a lot of time has passed:
+git fetch "$UPSTREAM_REMOTE" main --quiet
 
 BRANCH="docs/<module-scope>/<kebab-verb-slug>"
 # Examples:
@@ -198,7 +200,11 @@ BRANCH="docs/<module-scope>/<kebab-verb-slug>"
 #   docs/pentesting/reformat-nmap-table
 #   docs/forensics/dedupe-chain-of-custody
 
-git checkout -b "$BRANCH"
+# Atomic: creates the branch AND checks it out, based on upstream/main.
+# Note: the working tree will NOT contain .opencode/command/review-content.md
+# during this branch, because upstream/main does not have it. That is fine —
+# the agent already has the command in memory.
+git checkout -b "$BRANCH" "${UPSTREAM_REMOTE}/main"
 ```
 
 Slug rules:
@@ -282,11 +288,15 @@ EOF
 - No `Co-authored-by`.
 - Fixed sections: `What`, `Why`, `Out of scope`, `File(s)`.
 
-### 5.6 Return to main and pause
+### 5.6 Return to initial branch and pause
 
 ```bash
-git checkout main
+# Return to the branch where the user invoked the command.
+# This restores the command file in the working tree so the next invocation works.
+git checkout "$INITIAL_BRANCH"
 ```
+
+If a stash was created in preflight step 6, **do not pop it yet** — wait until the session summary (§7).
 
 **Mandatory pause between PRs** (GitHub anti-spam posture):
 
@@ -342,9 +352,19 @@ When the user ends the session (all approved blocks processed or they stop), pri
 ### Pending blocks (for next invocation)
 - Block X: <description>
 - ...
+
+### Reminder
+You are now back on `$INITIAL_BRANCH`. Keep this branch checked out so
+`/review-content` stays available in the working tree. If you switch to a
+branch that does not contain `.opencode/command/review-content.md`, the
+command will disappear until you return.
 ```
 
-Leave `main` as the active branch with a clean working tree (restore any stashed changes).
+Final cleanup in order:
+
+1. Ensure the active branch is `$INITIAL_BRANCH` (the branch from which the user invoked the command).
+2. If a stash was created in preflight step 6, pop it: `git stash pop`. If the pop conflicts, stop and report — do not auto-resolve.
+3. Verify `.opencode/command/review-content.md` exists in the working tree. If it does not, report an error.
 
 ---
 
