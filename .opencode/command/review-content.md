@@ -117,7 +117,7 @@ The argument `$ARGUMENTS` may be:
 
 ## 4. Diagnosis (no edits yet)
 
-Read the full target file. Produce a structured diagnosis along **three axes**, grouped into **atomic blocks**. Each block is the unit of a future PR.
+Read the full target file. Produce a structured diagnosis along **four axes**, grouped into **atomic blocks**. Each block is the unit of a future PR. Axes A–C apply per file; Axis D applies at module level when reviewing multiple files.
 
 ### Axis A — Technical content
 
@@ -147,13 +147,40 @@ Read the full target file. Produce a structured diagnosis along **three axes**, 
 - Missing TOC in long files (> 200 lines).
 - Missing `---` separators between major sections.
 
+### Axis D — Cross-file coherence (module-level review only)
+
+When the target is an entire module (multiple `.es.md` files), perform an additional cross-file analysis **after** diagnosing each file individually:
+
+- **Duplicated content across files**: Tables, command lists, concept explanations, or example blocks that appear in more than one lesson nearly verbatim. If two files explain the same topic (e.g. permissions, user management), determine which file should be the canonical source and propose that the other reference it instead of duplicating. Partial overlap counts — a table that is a strict subset of another table in a different file is duplication.
+- **Lesson ordering**: Read the module's `README.md` to determine the teaching sequence. Verify that the order respects the dependency graph — a lesson that uses concepts (e.g. "terminal", "shell", "chmod") must come **after** the lesson that introduces them. Flag inversions where students encounter undefined terminology because the introductory lesson is scheduled later.
+- **Scope overlap between lessons**: If two files cover the same broad topic from different angles (e.g. security-focused vs admin-focused user management), determine whether the overlap is justified (different pedagogical purpose) or accidental (copy-paste drift). Only flag accidental overlap as a block.
+- **Orphaned references**: A lesson says "como vimos anteriormente" or "recordemos que" pointing to content that does not actually appear in any preceding lesson per the README order.
+
+Cross-file blocks are reported as a **separate section** in the diagnosis, after the per-file blocks:
+
+```
+## Cross-file diagnosis: <module-name>
+
+### Cross-Block 1 — <short topic title>
+- **Type**: duplication | ordering | scope-overlap | orphaned-reference
+- **Files involved**: `<file1.es.md>`, `<file2.es.md>`
+- **Problem**: <concise description>
+- **Severity**: critical | high | medium | low
+- **Proposal**: <consolidate in file X / reorder README / add cross-reference>
+- **Why**: <pedagogical or maintenance reason>
+```
+
+Cross-file blocks may touch multiple files and/or the module's `README.md`. When applying them, each affected file gets its own atomic commit within the same PR branch, but a **single PR** groups the entire cross-file block (since the changes are logically inseparable).
+
+> **Note on module `README.md` files**: In this repository, module-level `README.md` files (e.g. `02-linux/README.md`) serve as the **Spanish lesson index** — they link exclusively to `.es.md` files and their content is in Spanish, despite the `.md` extension. They are editable when a cross-file block requires reordering the teaching sequence. The hardblock "Never touch English `.md` files" refers to the English content siblings (e.g. `intro-linux.md`), not these index files.
+
 ### Diagnosis output format
 
 ```
 ## Diagnosis: <relative/path/to/file.es.md>
 
 ### Block 1 — <short topic title>
-- **Axis**: content | structure | visualization
+- **Axis**: content | structure | visualization | cross-file
 - **Problem**: <concise description>
 - **Severity**: critical | high | medium | low
 - **Proposal**: <what you would change>
